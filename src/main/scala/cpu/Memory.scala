@@ -34,14 +34,17 @@ class Memory(memoryPath: Option[Int => String], baseAddress: UInt = "x80000000".
   }
   val imemWordAddrBits = io.imem.addr.getWidth - 2
   val imemWordAddr = (io.imem.addr - baseAddress) >> 2
-  val imemWordAddrFetched = Reg(UInt(imemWordAddrBits.W)) // フェッチ済みのアドレス
+  val imemWordAddrFetched = RegInit(0.U(imemWordAddrBits.W)) // フェッチ済みのアドレス
   val isFirstCycle = RegInit(true.B)  // リセット直後かどうか？
+  val imemValid = !isFirstCycle && imemWordAddrFetched === imemWordAddr
+  val imemWordAddrFetching = Mux(imemValid, imemWordAddrFetched + 1.U, imemWordAddr)
+  
   isFirstCycle := false.B
+  imemWordAddrFetched := imemWordAddrFetching
   // リセット直後でなく、対象アドレスがフェッチ済みならデータ有効
-  io.imem.valid := !isFirstCycle && imemWordAddrFetched === imemWordAddr
-  imemWordAddrFetched := imemWordAddr
+  io.imem.valid := imemValid
   io.imem.inst := Cat(
-    (0 to 3).map(i => mems(i).read(imemWordAddr)).reverse
+    (0 to 3).map(i => mems(i).read(imemWordAddrFetching)).reverse
   )
 
   io.dmem.rvalid := false.B
