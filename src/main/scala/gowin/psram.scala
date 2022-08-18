@@ -81,12 +81,12 @@ class DmemPortIoPSRAMBridge(addressBits: Int = 21, dataBits: Int = 64, psramBurs
     val mem = new DmemPortIo
   })
 
-  val commandInterval = dataBits match {
+  val commandInterval = psramBurstCount match {
     case 16 => 15
     case 32 => 19
     case 64 => 27
     case 128 => 43
-    case _ => { assert(false, "dataBits must be 16, 32, 64 or 128."); 0 /* dummy */  }
+    case _ => { assert(false, "psramBurstCount must be 16, 32, 64 or 128."); 0 /* dummy */  }
   }
 
   val addr = RegInit(0.U(addressBits.W))
@@ -139,7 +139,7 @@ class DmemPortIoPSRAMBridge(addressBits: Int = 21, dataBits: Int = 64, psramBurs
   io.mem.rdata := memRData
 
   val memWordAddress = io.mem.addr >> 2
-  val memBurstBufferOffset = memWordAddress & burstBufferOffsetMask
+  val memBurstBufferOffset = (memWordAddress & burstBufferOffsetMask)(log2Ceil(burstBufferLengthInMemWords)-1, 0)
   val memIsPartialWrite = !io.mem.wstrb.andR
   val isMemAddressBurstBufferRange = burstBaseMemAddressStart <= memWordAddress && memWordAddress <= burstBaseMemAddressEnd
   // The burst buffer is valid and the address range currently loaded into the buffer is in range.
@@ -150,15 +150,27 @@ class DmemPortIoPSRAMBridge(addressBits: Int = 21, dataBits: Int = 64, psramBurs
   val canAccessToBuffer = state === State.Idle
 
   memRValid := false.B
-  when(io.mem.ren && isMemReadFromBuffer && canAccessToBuffer ) {
+  when(!memRValid && io.mem.ren && isMemReadFromBuffer && canAccessToBuffer ) {
     // The burst buffer contains the target address data.
     memRValid := true.B
-    memRData := burstBuffer(memBurstBufferOffset)
+    val value = burstBuffer(memBurstBufferOffset)
+    memRData := value
+    printf(p"ReadBuffer  addr:${Hexadecimal(io.mem.addr)} offset:${Hexadecimal(memBurstBufferOffset)} value:${Hexadecimal(value)}\n")
   }
+
+  io.mem.wready := isMemWriteToBuffer && canAccessToBuffer
   when(io.mem.wen && isMemWriteToBuffer && canAccessToBuffer ) {
+    val newDirtyBytes = burstBufferDirtyBytes | (io.mem.wstrb << (memBurstBufferOffset * 4.U))
+    // If the whole word is filled. this word must be marked as "valid"
+    val newValid = Cat((0 to burstBufferLengthInMemWords - 1).map(memWord => burstBufferDirtyBytes((memWord + 1)*4-1, memWord*4).andR).reverse)
+    printf(p"WriteBuffer addr:${Hexadecimal(io.mem.addr)} offset:${Hexadecimal(memBurstBufferOffset)} data:${Hexadecimal(io.mem.wdata)} dirty:${Hexadecimal(newDirtyBytes)} valid:${Hexadecimal(newValid)}\n")
     // The burst buffer is empty or contains the target address data.
-    burstBufferValid := (burstBufferDirtyBytes >> (memBurstBufferOffset * 4.U)) === "b1111".U // If the whole word is filled. this word must be marked as "valid"
-    burstBufferDirtyBytes := burstBufferDirtyBytes | (io.mem.wstrb << (memBurstBufferOffset * 4.U))
+    when( burstBaseMemAddressStart === (memWordAddress & burstBufferAddressMask) ) {
+      burstBufferValid := burstBufferValid | newValid
+    } .otherwise {
+      burstBufferValid := newValid
+    }
+    burstBufferDirtyBytes := newDirtyBytes
     burstBaseMemAddressStart := memWordAddress & burstBufferAddressMask
     burstBaseMemAddressEnd := (memWordAddress & burstBufferAddressMask) | burstBufferOffsetMask
     // Update the target bytes in the buffer.
@@ -174,7 +186,7 @@ class DmemPortIoPSRAMBridge(addressBits: Int = 21, dataBits: Int = 64, psramBurs
       }
     }
     is(State.Idle) {
-      when( cmdIntervalCount > 0.U ) {
+      when( cmdIntervalCount === 0.U ) {
         when( io.mem.ren && !isMemReadFromBuffer ) {
           when( burstBufferDirtyBytes === 0.U )  { // The burst buffer is not dirty. We can load the target burst range to the buffer.
             state := State.StartFill
@@ -187,11 +199,15 @@ class DmemPortIoPSRAMBridge(addressBits: Int = 21, dataBits: Int = 64, psramBurs
       }
     }
     is(State.StartFill) {
+      val fillStartAddress = memWordAddress & burstBufferAddressMask
       burstCount := 0.U
       cmd := cmdRead
       cmdEn := true.B
-      addr := memWordToPsramAddress(memWordAddress)
+      addr := memWordToPsramAddress(fillStartAddress)
       cmdIntervalCount := commandInterval.U
+      burstBufferValid := 0.U
+      burstBaseMemAddressStart := fillStartAddress
+      burstBaseMemAddressEnd := fillStartAddress | burstBufferOffsetMask
       state := State.Filling
     }
     is(State.Filling) {
@@ -213,9 +229,9 @@ class DmemPortIoPSRAMBridge(addressBits: Int = 21, dataBits: Int = 64, psramBurs
       burstCount := 1.U // The first burst is written within this cycle.
       cmd := cmdWrite
       cmdEn := true.B
-      addr := memWordToPsramAddress(memWordAddress)
+      addr := memWordToPsramAddress(burstBaseMemAddressStart)
       wrData := Cat(burstBuffer(1), burstBuffer(0))
-      wrDataMask := burstBufferDirtyBytes(7, 0)
+      wrDataMask := ~burstBufferDirtyBytes(7, 0)
       cmdIntervalCount := commandInterval.U
       state := State.Flushing
     }
@@ -224,11 +240,118 @@ class DmemPortIoPSRAMBridge(addressBits: Int = 21, dataBits: Int = 64, psramBurs
       val burstUpperWordIndex = burstIndexBase | 1.U
       val burstLowerWordIndex = burstIndexBase | 0.U
       wrData := Cat(burstBuffer(burstUpperWordIndex), burstBuffer(burstLowerWordIndex))
-      wrDataMask := (burstBufferDirtyBytes >> (burstCount * 8.U)) & "b11111111".U
+      wrDataMask := ~((burstBufferDirtyBytes >> (burstCount * 8.U)) & "b11111111".U)
       burstCount := burstCount + 1.U
       when(burstCount === (controllerBurstCount - 1).U) {
         burstBufferDirtyBytes := 0.U // Now the burst buffer is flushed, clear the dirty bits.
         state := State.Idle
+      }
+    }
+  }
+}
+
+class SimPSRAM(addressBits: Int = 21, psramBurstCount: Int = 16) extends Module {
+  val io = IO(new Bundle {
+    val psram = Flipped(PSRAMMemoryInterfacePort(addressBits, 64))
+  })
+
+  val commandInterval = psramBurstCount match {
+    case 16 => 15
+    case 32 => 19
+    case 64 => 27
+    case 128 => 43
+    case _ => { assert(false, "psramBurstCount must be 16, 32, 64 or 128."); 0 /* dummy */  }
+  }
+
+  val psramWordBits = 16
+  val mem = Mem(BigInt(1) << addressBits, UInt(psramWordBits.W))
+
+  val psramBurstOffsetMask = (psramBurstCount - 1).U(addressBits.W)
+  val psramBurstBaseAddressMask = ~psramBurstOffsetMask
+
+  val calibrationCounter = RegInit(6.U)
+  val calibrating = calibrationCounter > 0.U
+  when(calibrating) {
+    calibrationCounter := calibrationCounter - 1.U
+  }
+  io.psram.init_calib := !calibrating
+
+  val commandIntervalCounter = RegInit(0.U(log2Ceil(commandInterval).W))
+
+  object State extends ChiselEnum {
+    val Idle, PrepareRead, Read, Write = Value
+  }
+  val burstCounter = RegInit(0.U(log2Ceil(psramBurstCount + 1).W))
+  val state = RegInit(State.Idle)
+  val cmdRead = false.B
+  val cmdWrite = true.B
+
+  val readLatency = 6
+  val readLatencyCounter = RegInit(0.U(log2Ceil(readLatency).W))
+  val targetBaseAddress = RegInit(0.U(addressBits.W))
+  val burstOffsetAddress = RegInit(0.U(log2Ceil(psramBurstCount).W))
+  val targetAddress = targetBaseAddress | burstOffsetAddress
+  val readData = RegInit(0.U(64.W))
+  
+  io.psram.rd_data := readData
+  io.psram.rd_data_valid := state === State.Read
+
+  def updateMemWithMask(address: UInt, writeData: UInt, writeMask: UInt) = {
+    val data = Cat((0 to 3).map(i => mem(address + i.U)).reverse)
+    val mask = Cat(writeMask.asBools.map(v => Fill(8, v)).reverse)
+    val updated = (data & mask) | (writeData & ~mask)
+    for(i <- 0 to 3) {
+      mem(address + i.U) := updated((i+1)*psramWordBits-1, i*psramWordBits)
+    }
+  }
+
+  when( commandIntervalCounter > 0.U ) {
+    commandIntervalCounter := commandIntervalCounter - 1.U
+  }
+
+  when(!calibrating) {
+    switch(state) {
+      is(State.Idle) {
+        when( commandIntervalCounter === 0.U) {
+          when( io.psram.cmd_en ) {
+            targetBaseAddress := io.psram.addr & psramBurstBaseAddressMask
+            when( io.psram.cmd === cmdRead ) {
+              burstCounter := (psramBurstCount/4 - 1).U
+              burstOffsetAddress := 0.U
+              readLatencyCounter := readLatency.U
+              state := State.PrepareRead
+            } .otherwise {
+              burstCounter := (psramBurstCount/4 - 2).U
+              burstOffsetAddress := 4.U
+              updateMemWithMask(io.psram.addr, io.psram.wr_data, io.psram.data_mask)
+              state := State.Write
+            }
+          }
+        }
+      }
+      is(State.PrepareRead) {
+        readLatencyCounter := readLatencyCounter - 1.U
+        readData := Cat((0 to 3).map(i => mem(targetAddress + i.U)).reverse)
+        when(readLatencyCounter === 0.U) {
+          burstOffsetAddress := burstOffsetAddress + 4.U
+          state := State.Read
+        }
+      }
+      is(State.Read) {
+        burstCounter := burstCounter - 1.U
+        burstOffsetAddress := burstOffsetAddress + 4.U
+        readData := Cat((0 to 3).map(i => mem(targetAddress + i.U)).reverse)
+        when(burstCounter === 0.U) {
+          state := State.Idle
+        }
+      }
+      is(State.Write) {
+        updateMemWithMask(targetAddress, io.psram.wr_data, io.psram.data_mask)
+        burstOffsetAddress := burstOffsetAddress + 4.U
+        burstCounter := burstCounter - 1.U
+        when(burstCounter === 0.U) {
+          state := State.Idle
+        }
       }
     }
   }
