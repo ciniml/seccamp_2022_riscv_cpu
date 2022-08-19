@@ -17,6 +17,7 @@ class DMemDecoder(targetAddressRanges: Seq[(BigInt, BigInt)]) extends Module {
 
   io.initiator.rvalid := rvalid
   io.initiator.rdata := rdata
+  io.initiator.wready := wready
 
   for(((start, length), index) <- targetAddressRanges.zipWithIndex) {
     val target = io.targets(index)
@@ -38,6 +39,7 @@ class DMemDecoder(targetAddressRanges: Seq[(BigInt, BigInt)]) extends Module {
       ren := io.initiator.ren
       rvalid := target.rvalid
       rdata := target.rdata
+      wready := target.wready
       wen := io.initiator.wen
       wdata := io.initiator.wdata
       wstrb := io.initiator.wstrb

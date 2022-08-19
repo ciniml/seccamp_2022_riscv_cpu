@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import common.Instructions._
 import common.Consts._
+import chisel3.util.random.LFSR
 
 class Core(startAddress: UInt = START_ADDR, suppressDebugMessage: Boolean = false) extends Module {
   val io = IO(
@@ -303,12 +304,14 @@ class Core(startAddress: UInt = START_ADDR, suppressDebugMessage: Boolean = fals
   io.dmem.wstrb := mem_reg_mem_wstrb
   io.dmem.wdata := (mem_reg_rs2_data << (8.U * mem_reg_alu_out(1, 0)))(WORD_LEN-1, 0) // バイトアドレスでデータをシフト
   // WBでデータバスの内容が必要だが、データバスのデータが有効でないならストール
-  mem_stall_flg := io.dmem.ren && !io.dmem.rvalid
+  mem_stall_flg := io.dmem.ren && !io.dmem.rvalid || io.dmem.wen && !io.dmem.wready
 
   // CSR
+  val lfsr = LFSR(WORD_LEN)
   val csr_rdata = MuxCase(0.U(WORD_LEN.W), Seq(
     (mem_reg_csr_addr === CSR_CUSTOM_GPIO.U) -> csr_gpio_out,
     (mem_reg_csr_addr === CSR_MTVEC.U) -> csr_trap_vector,
+    (mem_reg_csr_addr === CSR_ADDR_CUSTOM_LFSR.U) -> lfsr,
   ))
 
   val csr_wdata = MuxCase(0.U(WORD_LEN.W), Seq(

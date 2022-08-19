@@ -54,6 +54,7 @@ class Memory(memoryPath: Option[Int => String], baseAddress: UInt = "x80000000".
   )
   io.dmem.rvalid := rvalid
   io.dmem.rdata := rdata
+  io.dmem.wready := true.B
   rvalid := false.B
   val dmemAddrReg = Reg(UInt(io.dmem.addr.getWidth.W))
   when( io.dmem.ren && !io.dmem.wen && !rvalid ) {

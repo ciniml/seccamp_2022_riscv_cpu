@@ -20,6 +20,7 @@ class Gpio() extends Module {
   io.mem.rdata := MuxLookup(io.mem.addr(3, 2), "xDEADBEEF".U, Seq(
       0.U -> out, // Output
   ))
+  io.mem.wready := true.B
   when(io.mem.wen) {
     val mask = Cat((0 to 3).map(i => Mux(io.mem.wstrb(i), 0xff.U(8.W), 0x00.U(8.W))).reverse)
     switch(io.mem.addr(3,2)) {
