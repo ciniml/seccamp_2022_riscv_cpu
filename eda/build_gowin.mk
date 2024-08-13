@@ -19,10 +19,12 @@ OPENFPGA_LOADER ?= $(shell which openFPGALoader)
 PROJECT_ADDITIONAL_ARGS ?= 
 PROJECT_ADDITIONAL_CLEAN ?=
 
+GW_SH ?= $(shell which gw_sh)
+
 all: synthesis
 
 $(BITSTREAM): $(SRCS)
-	mkdir -p build/$(TARGET) && cd build/$(TARGET) && gw_sh ../../project.tcl $(SRC_DIR) $(RTL_DIR) $(TARGET) $(DEVICE_FAMILY) $(DEVICE_PART) $(PROJECT_NAME) $(PROJECT_ADDITIONAL_ARGS)
+	mkdir -p build/$(TARGET) && cd build/$(TARGET) && $(GW_SH) ../../project.tcl $(SRC_DIR) $(RTL_DIR) $(TARGET) $(DEVICE_FAMILY) $(DEVICE_PART) $(PROJECT_NAME) $(PROJECT_ADDITIONAL_ARGS)
 
 synthesis: $(BITSTREAM)
 

@@ -5,7 +5,7 @@ import chisel3.util._
 import common.Instructions._
 import common.Consts._
 
-class Core(startAddress: UInt = START_ADDR) extends Module {
+class Core(startAddress: UInt = START_ADDR, suppressDebugMessage: Boolean = false) extends Module {
   val io = IO(
     new Bundle {
       val imem = Flipped(new ImemPortIo())
@@ -246,10 +246,10 @@ class Core(startAddress: UInt = START_ADDR) extends Module {
     (exe_reg_exe_fun === ALU_OR)    -> (exe_reg_op1_data | exe_reg_op2_data),
     (exe_reg_exe_fun === ALU_XOR)   -> (exe_reg_op1_data ^ exe_reg_op2_data),
     (exe_reg_exe_fun === ALU_SLL)   -> (exe_reg_op1_data << exe_reg_op2_data(4, 0))(31, 0),
-    (exe_reg_exe_fun === ALU_SRL)   -> (exe_reg_op1_data >> exe_reg_op2_data(4, 0)).asUInt(),
-    (exe_reg_exe_fun === ALU_SRA)   -> (exe_reg_op1_data.asSInt() >> exe_reg_op2_data(4, 0)).asUInt(),
-    (exe_reg_exe_fun === ALU_SLT)   -> (exe_reg_op1_data.asSInt() < exe_reg_op2_data.asSInt()).asUInt(),
-    (exe_reg_exe_fun === ALU_SLTU)  -> (exe_reg_op1_data < exe_reg_op2_data).asUInt(),
+    (exe_reg_exe_fun === ALU_SRL)   -> (exe_reg_op1_data >> exe_reg_op2_data(4, 0)).asUInt,
+    (exe_reg_exe_fun === ALU_SRA)   -> (exe_reg_op1_data.asSInt >> exe_reg_op2_data(4, 0)).asUInt,
+    (exe_reg_exe_fun === ALU_SLT)   -> (exe_reg_op1_data.asSInt < exe_reg_op2_data.asSInt).asUInt,
+    (exe_reg_exe_fun === ALU_SLTU)  -> (exe_reg_op1_data < exe_reg_op2_data).asUInt,
     (exe_reg_exe_fun === ALU_JALR)  -> ((exe_reg_op1_data + exe_reg_op2_data) & ~1.U(WORD_LEN.W)),
     (exe_reg_exe_fun === ALU_COPY1) -> exe_reg_op1_data
   ))
@@ -258,8 +258,8 @@ class Core(startAddress: UInt = START_ADDR) extends Module {
   exe_br_flg := MuxCase(false.B, Seq(
     (exe_reg_exe_fun === BR_BEQ)  ->  (exe_reg_op1_data === exe_reg_op2_data),
     (exe_reg_exe_fun === BR_BNE)  -> !(exe_reg_op1_data === exe_reg_op2_data),
-    (exe_reg_exe_fun === BR_BLT)  ->  (exe_reg_op1_data.asSInt() < exe_reg_op2_data.asSInt()),
-    (exe_reg_exe_fun === BR_BGE)  -> !(exe_reg_op1_data.asSInt() < exe_reg_op2_data.asSInt()),
+    (exe_reg_exe_fun === BR_BLT)  ->  (exe_reg_op1_data.asSInt < exe_reg_op2_data.asSInt),
+    (exe_reg_exe_fun === BR_BGE)  -> !(exe_reg_op1_data.asSInt < exe_reg_op2_data.asSInt),
     (exe_reg_exe_fun === BR_BLTU) ->  (exe_reg_op1_data < exe_reg_op2_data),
     (exe_reg_exe_fun === BR_BGEU) -> !(exe_reg_op1_data < exe_reg_op2_data)
   ))
@@ -361,19 +361,21 @@ class Core(startAddress: UInt = START_ADDR) extends Module {
   io.success := successDetected
   io.exit := if_inst === ECALL
   io.debug_pc := if_reg_pc
-  printf(p"if_reg_pc        : 0x${Hexadecimal(if_reg_pc)}\n")
-  printf(p"id_reg_pc        : 0x${Hexadecimal(id_reg_pc)}\n")
-  printf(p"id_reg_inst      : 0x${Hexadecimal(id_reg_inst)}\n")
-  printf(p"stall_flg        : 0x${Hexadecimal(stall_flg)}\n")
-  printf(p"id_inst          : 0x${Hexadecimal(id_inst)}\n")
-  printf(p"id_rs1_data      : 0x${Hexadecimal(id_rs1_data)}\n")
-  printf(p"id_rs2_data      : 0x${Hexadecimal(id_rs2_data)}\n")
-  printf(p"exe_reg_pc       : 0x${Hexadecimal(exe_reg_pc)}\n")
-  printf(p"exe_reg_op1_data : 0x${Hexadecimal(exe_reg_op1_data)}\n")
-  printf(p"exe_reg_op2_data : 0x${Hexadecimal(exe_reg_op2_data)}\n")
-  printf(p"exe_alu_out      : 0x${Hexadecimal(exe_alu_out)}\n")
-  printf(p"mem_reg_pc       : 0x${Hexadecimal(mem_reg_pc)}\n")
-  printf(p"mem_wb_data      : 0x${Hexadecimal(mem_wb_data)}\n")
-  printf(p"wb_reg_wb_data   : 0x${Hexadecimal(wb_reg_wb_data)}\n")
-  printf("---------\n")
+  if( !suppressDebugMessage ) {
+    printf(p"if_reg_pc        : 0x${Hexadecimal(if_reg_pc)}\n")
+    printf(p"id_reg_pc        : 0x${Hexadecimal(id_reg_pc)}\n")
+    printf(p"id_reg_inst      : 0x${Hexadecimal(id_reg_inst)}\n")
+    printf(p"stall_flg        : 0x${Hexadecimal(stall_flg)}\n")
+    printf(p"id_inst          : 0x${Hexadecimal(id_inst)}\n")
+    printf(p"id_rs1_data      : 0x${Hexadecimal(id_rs1_data)}\n")
+    printf(p"id_rs2_data      : 0x${Hexadecimal(id_rs2_data)}\n")
+    printf(p"exe_reg_pc       : 0x${Hexadecimal(exe_reg_pc)}\n")
+    printf(p"exe_reg_op1_data : 0x${Hexadecimal(exe_reg_op1_data)}\n")
+    printf(p"exe_reg_op2_data : 0x${Hexadecimal(exe_reg_op2_data)}\n")
+    printf(p"exe_alu_out      : 0x${Hexadecimal(exe_alu_out)}\n")
+    printf(p"mem_reg_pc       : 0x${Hexadecimal(mem_reg_pc)}\n")
+    printf(p"mem_wb_data      : 0x${Hexadecimal(mem_wb_data)}\n")
+    printf(p"wb_reg_wb_data   : 0x${Hexadecimal(wb_reg_wb_data)}\n")
+    printf("---------\n")
+  }
 }

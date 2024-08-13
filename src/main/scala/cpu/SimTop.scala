@@ -10,7 +10,7 @@ class SimTop(memoryPath: Int => String) extends Module {
     val success = Output(Bool())
     val exit = Output(Bool())
   })
-  val core = Module(new Core())
+  val core = Module(new Core(suppressDebugMessage = true))
   val memory = Module(new Memory(Some(memoryPath)))
 
   core.io.imem <> memory.io.imem
