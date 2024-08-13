@@ -1,6 +1,6 @@
 .PHONY: all clean test view
 
-SIM_SRCS := tb.sv ./iobuf_sim.sv ./top.sv ./riscv.v
+SIM_SRCS := tb.sv ./iobuf_sim.sv ./top.sv ./Top.sv
 
 all: test
 

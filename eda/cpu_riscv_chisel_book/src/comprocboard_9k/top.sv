@@ -69,6 +69,9 @@ logic io_exit;
 assign d = io_debug_pc[9:2];
 
 logic cpu_halt = 0;
+logic success = 0;
+logic exit = 0;
+
 always_ff @(posedge clock) begin
   if( reset ) begin
     cpu_halt <= 0;
@@ -77,10 +80,14 @@ always_ff @(posedge clock) begin
     if( io_exit ) begin
       cpu_halt <= 1;
     end
+    if( !cpu_halt ) begin
+      success <= io_success;
+      exit    <= io_exit;
+    end
   end
 end
 
-assign led = ~{3'b000, reset, io_success, io_exit};
+assign led = ~{3'b000, reset, success, exit};
 
 Top core(
   .clock(clock && !cpu_halt),
